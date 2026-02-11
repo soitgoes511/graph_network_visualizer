@@ -1,0 +1,9 @@
+fastapi
+uvicorn
+beautifulsoup4
+requests
+python-docx
+pypdf
+networkx
+python-multipart
+websockets

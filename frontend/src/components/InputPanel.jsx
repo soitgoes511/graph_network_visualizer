@@ -132,26 +132,41 @@ const InputPanel = ({
                         padding: '8px',
                         borderRadius: '4px'
                     }}>
-                        {rootNodes.map(node => (
-                            <div key={node.id} style={{ display: 'flex', alignItems: 'center', marginBottom: '4px' }}>
-                                <input
-                                    type="checkbox"
-                                    id={`filter-${node.id}`}
-                                    checked={selectedFilters.includes(node.id)}
-                                    onChange={(e) => {
-                                        if (e.target.checked) {
-                                            onFilterChange([...selectedFilters, node.id]);
-                                        } else {
-                                            onFilterChange(selectedFilters.filter(id => id !== node.id));
-                                        }
-                                    }}
-                                    style={{ marginRight: '8px' }}
-                                />
-                                <label htmlFor={`filter-${node.id}`} style={{ fontSize: '0.85rem', cursor: 'pointer', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }} title={node.title}>
-                                    {node.title}
-                                </label>
-                            </div>
-                        ))}
+                        {/* Group nodes by title and sort alphabetically */
+                            Object.entries(rootNodes.reduce((acc, node) => {
+                                if (!acc[node.title]) acc[node.title] = [];
+                                acc[node.title].push(node.id);
+                                return acc;
+                            }, {}))
+                                .sort((a, b) => a[0].localeCompare(b[0]))
+                                .map(([title, ids]) => {
+                                    const isChecked = ids.every(id => selectedFilters.includes(id));
+                                    return (
+                                        <div key={title} style={{ display: 'flex', alignItems: 'center', marginBottom: '4px' }}>
+                                            <input
+                                                type="checkbox"
+                                                id={`filter-${title}`}
+                                                checked={isChecked}
+                                                onChange={(e) => {
+                                                    if (e.target.checked) {
+                                                        const newIds = ids.filter(id => !selectedFilters.includes(id));
+                                                        onFilterChange([...selectedFilters, ...newIds]);
+                                                    } else {
+                                                        onFilterChange(selectedFilters.filter(id => !ids.includes(id)));
+                                                    }
+                                                }}
+                                                style={{ marginRight: '8px' }}
+                                            />
+                                            <label
+                                                htmlFor={`filter-${title}`}
+                                                style={{ fontSize: '0.85rem', cursor: 'pointer', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}
+                                                title={title}
+                                            >
+                                                {title}
+                                            </label>
+                                        </div>
+                                    );
+                                })}
                     </div>
                     {selectedFilters.length > 0 && (
                         <button

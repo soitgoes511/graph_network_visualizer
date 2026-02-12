@@ -7,6 +7,9 @@ import asyncio
 from scraper import scrape_url
 from parser import parse_pdf, parse_docx
 from graph_builder import build_graph_from_data
+from nlp_processor import process_text
+
+SAVE_FILE_PATH = "saved_graph.json"
 
 app = FastAPI()
 
@@ -90,6 +93,10 @@ async def process_data(
             log_callback(f"Error processing URLs: {e}")
             print(f"Error processing URLs: {e}")
 
+        except Exception as e:
+            log_callback(f"Error processing URLs: {e}")
+            print(f"Error processing URLs: {e}")
+
     # 2. Process Files
     # File reading is async, parsing is sync/cpu bound
     if files:
@@ -114,6 +121,7 @@ async def process_data(
                         "title": file.filename, 
                         "type": "file", 
                         "text": file_data["text"][:200] + "...",
+                        "full_text": file_data["text"], # Store for NLP
                         "val": 10 
                     })
                     
@@ -125,9 +133,82 @@ async def process_data(
                  log_callback(f"Error processing file {file.filename}: {e}")
                  print(f"Error processing file {file.filename}: {e}")
 
-    # 3. Build Graph (Blocking)
+    # 3. NLP Extraction (CPU bound)
+    log_callback("Running NLP analysis on content...")
+    nlp_nodes = []
+    nlp_links = []
+    
+    # helper to process text and add nodes
+    def extract_nlp_data(source_id, text):
+        if not text: return
+        analysis = process_text(text)
+        
+        # Add Concepts
+        for concept in analysis["concepts"]:
+            concept_id = f"concept:{concept['text']}"
+            if concept_id not in [n["id"] for n in nlp_nodes]:
+                 nlp_nodes.append({
+                     "id": concept_id,
+                     "title": concept["text"],
+                     "type": "concept",
+                     "val": 3 + (concept["count"] * 0.5) # Scale size by frequency
+                 })
+            nlp_links.append({"source": source_id, "target": concept_id})
+            
+        # Add Entities
+        for ent in analysis["entities"]:
+            ent_id = f"entity:{ent['text']}"
+            if ent_id not in [n["id"] for n in nlp_nodes]:
+                 nlp_nodes.append({
+                     "id": ent_id,
+                     "title": ent["text"],
+                     "type": ent["type"], # PERSON, ORG, etc.
+                     "val": 5
+                 })
+            nlp_links.append({"source": source_id, "target": ent_id})
+
+    # Process URL nodes
+    for node in all_nodes:
+        if node.get("type") == "web" and "text" in node:
+            # For web nodes, 'text' field currently holds the content (up to 50k chars)
+            # scraper.py was modified to put content in 'text'
+            await loop.run_in_executor(None, extract_nlp_data, node["id"], node["text"])
+            
+    # Process File nodes
+    for node in all_nodes:
+        if node.get("type") == "file" and "full_text" in node:
+             await loop.run_in_executor(None, extract_nlp_data, node["id"], node["full_text"])
+    
+    all_nodes.extend(nlp_nodes)
+    all_links.extend(nlp_links)
+
+    # 4. Build Graph (Blocking)
     log_callback("Building graph network...")
     graph_data = await loop.run_in_executor(None, build_graph_from_data, all_nodes, all_links)
     
     log_callback(f"Processing complete. Graph has {len(graph_data['nodes'])} nodes and {len(graph_data['links'])} links.")
     return graph_data
+
+class GraphData(BaseModel):
+    nodes: List[dict]
+    links: List[dict]
+
+@app.post("/save_graph")
+async def save_graph(data: GraphData):
+    try:
+        with open(SAVE_FILE_PATH, "w") as f:
+            json.dump(data.model_dump(), f)
+        return {"message": "Graph saved successfully"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/load_graph")
+async def load_graph():
+    try:
+        with open(SAVE_FILE_PATH, "r") as f:
+            data = json.load(f)
+        return data
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail="No saved graph found")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))

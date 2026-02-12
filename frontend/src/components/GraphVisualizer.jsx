@@ -3,43 +3,55 @@ import ForceGraph3D from 'react-force-graph-3d';
 
 const GraphVisualizer = ({ graphData }) => {
     const fgRef = useRef();
+    const [dimensions, setDimensions] = React.useState({ width: window.innerWidth, height: window.innerHeight });
 
-    // Resize handler? ForceGraph3D handles full screen by default if no width/height prop
+    useEffect(() => {
+        const handleResize = () => {
+            setDimensions({ width: window.innerWidth, height: window.innerHeight });
+        };
+        window.addEventListener('resize', handleResize);
+        return () => window.removeEventListener('resize', handleResize);
+    }, []);
 
     const handleNodeClick = useCallback(node => {
-        // Aim at node from outside it
+        // ... (existing click handler)
         const distance = 40;
         const distRatio = 1 + distance / Math.hypot(node.x, node.y, node.z);
 
         if (fgRef.current) {
             fgRef.current.cameraPosition(
-                { x: node.x * distRatio, y: node.y * distRatio, z: node.z * distRatio }, // new position
-                node, // lookAt ({ x, y, z })
-                3000  // ms transition duration
+                { x: node.x * distRatio, y: node.y * distRatio, z: node.z * distRatio },
+                node,
+                3000
             );
         }
 
-        // Also try to open URL if it's a web/external type
         if (node.id.startsWith('http')) {
             window.open(node.id, '_blank');
         }
     }, [fgRef]);
 
-    // Custom node color
     const getNodeColor = (node) => {
+        if (node.type === 'concept') return '#facc15'; // Yellow
+        if (node.type === 'PERSON') return '#fb923c'; // Orange
+        if (node.type === 'ORG') return '#ef4444'; // Red
+        if (node.type === 'GPE') return '#22c55e'; // Green
+
         switch (node.type) {
-            case 'web': return '#38bdf8'; // Sky blue
-            case 'file': return '#a855f7'; // Purple
-            case 'external': return '#f472b6'; // Pink
-            default: return '#94a3b8'; // Slate
+            case 'web': return '#38bdf8';
+            case 'file': return '#a855f7';
+            case 'external': return '#f472b6';
+            default: return '#94a3b8'; // gray for others
         }
     };
 
     return (
-        <div style={{ width: '100%', height: '100vh', position: 'fixed', top: 0, left: 0, zIndex: 0 }}>
+        <div style={{ width: '100vw', height: '100vh', position: 'fixed', top: 0, left: 0, zIndex: 0, overflow: 'hidden' }}>
             {graphData && graphData.nodes.length > 0 ? (
                 <ForceGraph3D
                     ref={fgRef}
+                    width={dimensions.width}
+                    height={dimensions.height}
                     graphData={graphData}
                     nodeLabel="title"
                     nodeColor={getNodeColor}

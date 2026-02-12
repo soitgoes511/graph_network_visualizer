@@ -48,8 +48,18 @@ def scrape_url(start_url: str, max_depth: int = 1, logger=None):
             soup = BeautifulSoup(response.content, 'html.parser')
             title = soup.title.string if soup.title else current_url
             
+            # Extract main text
+            # Simple heuristic: join all p tags
+            paragraphs = soup.find_all('p')
+            text_content = "\\n".join([p.get_text() for p in paragraphs])
+            
             if current_url not in node_ids:
-                nodes.append({"id": current_url, "title": title, "type": "web"})
+                nodes.append({
+                    "id": current_url, 
+                    "title": title, 
+                    "type": "web",
+                    "text": text_content[:50000] # Limit text size to avoid memory issues
+                })
                 node_ids.add(current_url)
 
             if depth < max_depth:

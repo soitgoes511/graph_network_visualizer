@@ -1,6 +1,15 @@
 import React, { useState, useRef } from 'react';
 
-const InputPanel = ({ onProcess, loading, onToggleLogs }) => {
+const InputPanel = ({
+    onProcess,
+    loading,
+    onToggleLogs,
+    onExport,
+    onImport,
+    rootNodes = [],
+    selectedFilters = [],
+    onFilterChange
+}) => {
     const [urls, setUrls] = useState([]);
     const [currentUrl, setCurrentUrl] = useState('');
     const [depth, setDepth] = useState(1);
@@ -38,7 +47,7 @@ const InputPanel = ({ onProcess, loading, onToggleLogs }) => {
     return (
         <div className="glass-panel overlay">
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
-                <h1 style={{ fontSize: '1.2rem', margin: 0 }}>Data Graph</h1>
+                <h1 style={{ fontSize: '1.2rem', margin: 0 }}>Network Xplore</h1>
                 <button
                     onClick={onToggleLogs}
                     style={{
@@ -111,6 +120,89 @@ const InputPanel = ({ onProcess, loading, onToggleLogs }) => {
             <button onClick={handleSubmit} disabled={loading || (urls.length === 0 && files.length === 0)}>
                 {loading ? <div className="spinner"></div> : 'VISUALIZE NETWORK'}
             </button>
+
+            {/* Filter Section */}
+            {rootNodes && rootNodes.length > 0 && (
+                <div style={{ marginTop: '20px', borderTop: '1px solid rgba(255,255,255,0.1)', paddingTop: '10px' }}>
+                    <label style={{ marginBottom: '8px', display: 'block' }}>Filter by Source</label>
+                    <div style={{
+                        maxHeight: '150px',
+                        overflowY: 'auto',
+                        background: 'rgba(0,0,0,0.2)',
+                        padding: '8px',
+                        borderRadius: '4px'
+                    }}>
+                        {rootNodes.map(node => (
+                            <div key={node.id} style={{ display: 'flex', alignItems: 'center', marginBottom: '4px' }}>
+                                <input
+                                    type="checkbox"
+                                    id={`filter-${node.id}`}
+                                    checked={selectedFilters.includes(node.id)}
+                                    onChange={(e) => {
+                                        if (e.target.checked) {
+                                            onFilterChange([...selectedFilters, node.id]);
+                                        } else {
+                                            onFilterChange(selectedFilters.filter(id => id !== node.id));
+                                        }
+                                    }}
+                                    style={{ marginRight: '8px' }}
+                                />
+                                <label htmlFor={`filter-${node.id}`} style={{ fontSize: '0.85rem', cursor: 'pointer', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }} title={node.title}>
+                                    {node.title}
+                                </label>
+                            </div>
+                        ))}
+                    </div>
+                    {selectedFilters.length > 0 && (
+                        <button
+                            onClick={() => onFilterChange([])}
+                            style={{
+                                marginTop: '8px',
+                                padding: '4px',
+                                fontSize: '0.8rem',
+                                background: 'transparent',
+                                border: '1px solid rgba(255,255,255,0.2)'
+                            }}
+                        >
+                            Clear Filters
+                        </button>
+                    )}
+                </div>
+            )}
+
+            {/* Data Management Section */}
+            <div style={{ marginTop: '20px', borderTop: '1px solid rgba(255,255,255,0.1)', paddingTop: '10px' }}>
+                <label style={{ marginBottom: '8px', display: 'block' }}>Manage Graph</label>
+                <div style={{ display: 'flex', gap: '8px' }}>
+                    <button onClick={onExport} style={{ flex: 1, fontSize: '0.85rem' }}>
+                        Save JSON
+                    </button>
+                    <label
+                        style={{
+                            flex: 1,
+                            fontSize: '0.85rem',
+                            background: 'rgba(255,255,255,0.1)',
+                            textAlign: 'center',
+                            padding: '10px',
+                            borderRadius: '4px',
+                            cursor: 'pointer',
+                            border: '1px solid rgba(255,255,255,0.1)',
+                            transition: 'all 0.2s'
+                        }}
+                        className="file-upload-btn"
+                    >
+                        Load JSON
+                        <input
+                            type="file"
+                            accept=".json"
+                            onChange={(e) => {
+                                if (e.target.files?.[0]) onImport(e.target.files[0]);
+                            }}
+                            style={{ display: 'none' }}
+                        />
+                    </label>
+                </div>
+            </div>
 
             <div style={{ marginTop: '20px', fontSize: '0.8rem', color: '#64748b' }}>
                 <p>Supports: Recursive crawling, PDF/DOCX parsing.</p>

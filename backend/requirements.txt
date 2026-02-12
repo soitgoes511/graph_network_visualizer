@@ -7,3 +7,5 @@ pypdf
 networkx
 python-multipart
 websockets
+spacy
+numpy<2.0.0

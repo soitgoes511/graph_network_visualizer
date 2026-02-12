@@ -12,8 +12,8 @@ const LogTerminal = ({ logs, onClose }) => {
     return (
         <div className="glass-panel" style={{
             position: 'absolute',
-            bottom: '20px',
-            left: '20px',
+            top: '20px',
+            right: '20px',
             width: '400px',
             height: '200px',
             zIndex: 20,

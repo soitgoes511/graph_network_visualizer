@@ -8,6 +8,7 @@ function App() {
   const [loading, setLoading] = useState(false);
   const [logs, setLogs] = useState([]);
   const [showLogs, setShowLogs] = useState(false);
+  const [activeFilters, setActiveFilters] = useState([]);
   const ws = useRef(null);
 
   useEffect(() => {
@@ -85,6 +86,7 @@ function App() {
 
       console.log("Graph Data received:", data);
       setGraphData(data);
+      setActiveFilters([]); // Reset filters on new data
     } catch (error) {
       console.error('Error processing:', error);
       setLogs(prev => [...prev, `Error: ${error.message}`]);
@@ -94,13 +96,108 @@ function App() {
     }
   };
 
+  // --- Export / Import ---
+  const handleExport = () => {
+    if (!graphData.nodes.length) return;
+    // Sanitize data before export:
+    // react-force-graph mutates links to be objects {source: Node, target: Node...}
+    // We need to convert them back to IDs {source: "id", target: "id"} to avoid issues on reload or circular refs.
+    const sanitizedData = {
+      nodes: graphData.nodes.map(n => {
+        // Create clean copy of node, removing internal visualization props if needed
+        // But primarily we just need to preserve the ID and data.
+        // Let's just clone it to be safe.
+        const { index, x, y, z, vx, vy, vz, ...rest } = n;
+        return rest;
+      }),
+      links: graphData.links.map(l => ({
+        source: l.source.id || l.source,
+        target: l.target.id || l.target
+      }))
+    };
+
+    const jsonString = JSON.stringify(sanitizedData, null, 2);
+    const blob = new Blob([jsonString], { type: 'application/json' });
+    const href = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = href;
+    link.download = `graph_network_${new Date().toISOString().slice(0, 10)}.json`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(href);
+  };
+
+  const handleImport = (file) => {
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      try {
+        const data = JSON.parse(e.target.result);
+        if (data.nodes && data.links) {
+          setGraphData(data);
+          setActiveFilters([]);
+          setLogs(prev => [...prev, `Loaded graph from ${file.name}`]);
+        } else {
+          alert("Invalid graph JSON format");
+        }
+      } catch (err) {
+        console.error(err);
+        alert("Failed to parse JSON");
+      }
+    };
+    reader.readAsText(file);
+  };
+
+  // --- Filtering ---
+  // Identify possible root nodes (URLs and Files)
+  const rootNodes = graphData.nodes.filter(n => n.type === 'web' || n.type === 'file');
+
+  const getFilteredGraph = () => {
+    if (activeFilters.length === 0) return graphData;
+
+    const selectedSet = new Set(activeFilters);
+
+    // 1. Keep selected root nodes
+    const validNodes = new Set(activeFilters);
+
+    // 2. Keep direct neighbors of selected roots
+    // Links might be objects (processed by visualizer) or raw IDs. Handle both.
+    graphData.links.forEach(link => {
+      const sourceId = link.source.id || link.source;
+      const targetId = link.target.id || link.target;
+
+      if (selectedSet.has(sourceId)) {
+        validNodes.add(targetId);
+      } else if (selectedSet.has(targetId)) {
+        validNodes.add(sourceId);
+      }
+    });
+
+    // 3. Filter nodes and links
+    const filteredNodes = graphData.nodes.filter(n => validNodes.has(n.id));
+    const filteredLinks = graphData.links.filter(link => {
+      const sourceId = link.source.id || link.source;
+      const targetId = link.target.id || link.target;
+      return validNodes.has(sourceId) && validNodes.has(targetId);
+    });
+
+    return { nodes: filteredNodes, links: filteredLinks };
+  };
+
+  const displayData = getFilteredGraph();
+
   return (
     <div className="App">
-      <GraphVisualizer graphData={graphData} />
+      <GraphVisualizer graphData={displayData} />
       <InputPanel
         onProcess={handleProcess}
         loading={loading}
         onToggleLogs={() => setShowLogs(!showLogs)}
+        onExport={handleExport}
+        onImport={handleImport}
+        rootNodes={rootNodes}
+        selectedFilters={activeFilters}
+        onFilterChange={setActiveFilters}
       />
       {showLogs && <LogTerminal logs={logs} onClose={() => setShowLogs(false)} />}
     </div>

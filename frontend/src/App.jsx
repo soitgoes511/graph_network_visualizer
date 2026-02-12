@@ -1,207 +1,515 @@
-import React, { useState, useEffect, useRef } from 'react';
-import InputPanel from './components/InputPanel';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import DetailsPanel from './components/DetailsPanel';
 import GraphVisualizer from './components/GraphVisualizer';
+import InputPanel from './components/InputPanel';
+import InsightsPanel from './components/InsightsPanel';
 import LogTerminal from './components/LogTerminal';
 
-function App() {
-  const [graphData, setGraphData] = useState({ nodes: [], links: [] });
-  const [loading, setLoading] = useState(false);
-  const [logs, setLogs] = useState([]);
-  const [showLogs, setShowLogs] = useState(false);
-  const [activeFilters, setActiveFilters] = useState([]);
-  const ws = useRef(null);
+const API_BASE = (import.meta.env.VITE_API_URL || 'http://localhost:8000').replace(/\/$/, '');
+const WS_URL = import.meta.env.VITE_WS_URL || `${API_BASE.replace(/^http/, 'ws')}/ws/logs`;
 
-  useEffect(() => {
-    // Connect to WebSocket
-    // Use localhost:8000 for dev. In prod/docker, this should be configurable.
-    const wsUrl = 'ws://localhost:8000/ws/logs';
-
-    const connectWs = () => {
-      ws.current = new WebSocket(wsUrl);
-
-      ws.current.onopen = () => {
-        console.log('WebSocket connected');
-        setLogs(prev => [...prev, 'System connected. Ready.']);
-        // Auto-show logs on connect so user knows it's working
-        setShowLogs(true);
-      };
-
-      ws.current.onmessage = (event) => {
-        const message = event.data;
-        setLogs(prev => [...prev, message]);
-        setShowLogs(true);
-      };
-
-      ws.current.onclose = () => {
-        console.log('WebSocket disconnected, retrying...');
-        setTimeout(connectWs, 3000);
-      };
-
-      ws.current.onerror = (error) => {
-        console.error('WebSocket error:', error);
-      };
-    };
-
-    connectWs();
-
-    return () => {
-      if (ws.current) {
-        ws.current.close();
-      }
-    };
-  }, []);
-
-  const handleProcess = async ({ urls, files, depth }) => {
-    setLoading(true);
-    setLogs(['Request sent. Waiting for server response...']);
-    setShowLogs(true);
-
-    const formData = new FormData();
-
-    if (urls.length > 0) {
-      formData.append('urls', JSON.stringify(urls));
+const getEndpointId = (value) => {
+    if (value && typeof value === 'object') {
+        return value.id || '';
     }
-    formData.append('depth', depth);
+    return value || '';
+};
 
-    if (files.length > 0) {
-      for (let i = 0; i < files.length; i++) {
-        formData.append('files', files[i]);
-      }
-    }
+const getLinkKey = (link) => {
+    const source = getEndpointId(link.source);
+    const target = getEndpointId(link.target);
+    const relationType = link.relation_type || 'RELATED_TO';
+    const predicate = link.predicate || '';
+    return `${source}->${target}|${relationType}|${predicate}`;
+};
 
-    try {
-      const response = await fetch('http://localhost:8000/process', {
-        method: 'POST',
-        body: formData,
-      });
+const findShortestPath = (graph, startId, endId) => {
+    if (!startId || !endId || startId === endId) return [];
 
-      if (!response.ok) {
-        throw new Error('Network response was not ok');
-      }
+    const adjacency = new Map();
+    const nodes = graph?.nodes || [];
+    const links = graph?.links || [];
 
-      const data = await response.json();
+    nodes.forEach((node) => adjacency.set(node.id, new Set()));
 
-      if (!data.nodes) data.nodes = [];
-      if (!data.links) data.links = [];
+    links.forEach((link) => {
+        const sourceId = getEndpointId(link.source);
+        const targetId = getEndpointId(link.target);
+        if (!sourceId || !targetId) return;
 
-      console.log("Graph Data received:", data);
-      setGraphData(data);
-      setActiveFilters([]); // Reset filters on new data
-    } catch (error) {
-      console.error('Error processing:', error);
-      setLogs(prev => [...prev, `Error: ${error.message}`]);
-      alert('Error processing data. Check logs for details.');
-    } finally {
-      setLoading(false);
-    }
-  };
+        if (!adjacency.has(sourceId)) adjacency.set(sourceId, new Set());
+        if (!adjacency.has(targetId)) adjacency.set(targetId, new Set());
+        adjacency.get(sourceId).add(targetId);
+        adjacency.get(targetId).add(sourceId);
+    });
 
-  // --- Export / Import ---
-  const handleExport = () => {
-    if (!graphData.nodes.length) return;
-    // Sanitize data before export:
-    // react-force-graph mutates links to be objects {source: Node, target: Node...}
-    // We need to convert them back to IDs {source: "id", target: "id"} to avoid issues on reload or circular refs.
-    const sanitizedData = {
-      nodes: graphData.nodes.map(n => {
-        // Create clean copy of node, removing internal visualization props if needed
-        // But primarily we just need to preserve the ID and data.
-        // Let's just clone it to be safe.
-        const { index, x, y, z, vx, vy, vz, ...rest } = n;
-        return rest;
-      }),
-      links: graphData.links.map(l => ({
-        source: l.source.id || l.source,
-        target: l.target.id || l.target
-      }))
-    };
+    const queue = [startId];
+    const visited = new Set([startId]);
+    const previous = new Map();
 
-    const jsonString = JSON.stringify(sanitizedData, null, 2);
-    const blob = new Blob([jsonString], { type: 'application/json' });
-    const href = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = href;
-    link.download = `graph_network_${new Date().toISOString().slice(0, 10)}.json`;
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-    URL.revokeObjectURL(href);
-  };
+    while (queue.length > 0) {
+        const current = queue.shift();
+        if (current === endId) break;
 
-  const handleImport = (file) => {
-    const reader = new FileReader();
-    reader.onload = (e) => {
-      try {
-        const data = JSON.parse(e.target.result);
-        if (data.nodes && data.links) {
-          setGraphData(data);
-          setActiveFilters([]);
-          setLogs(prev => [...prev, `Loaded graph from ${file.name}`]);
-        } else {
-          alert("Invalid graph JSON format");
+        for (const neighbor of adjacency.get(current) || []) {
+            if (visited.has(neighbor)) continue;
+            visited.add(neighbor);
+            previous.set(neighbor, current);
+            queue.push(neighbor);
         }
-      } catch (err) {
-        console.error(err);
-        alert("Failed to parse JSON");
-      }
+    }
+
+    if (!visited.has(endId)) return [];
+
+    const path = [];
+    let current = endId;
+    while (current !== undefined) {
+        path.push(current);
+        current = previous.get(current);
+    }
+
+    return path.reverse();
+};
+
+function App() {
+    const [graphData, setGraphData] = useState({ nodes: [], links: [], insights: {}, meta: {} });
+    const [loading, setLoading] = useState(false);
+    const [loadingMore, setLoadingMore] = useState(false);
+    const [resetToken, setResetToken] = useState(0);
+    const [logs, setLogs] = useState([]);
+    const [showLogs, setShowLogs] = useState(false);
+    const [unreadLogs, setUnreadLogs] = useState(0);
+    const [activeFilters, setActiveFilters] = useState([]);
+    const [selectedNode, setSelectedNode] = useState(null);
+    const [selectedLink, setSelectedLink] = useState(null);
+    const [pathStart, setPathStart] = useState('');
+    const [pathEnd, setPathEnd] = useState('');
+    const [shortestPath, setShortestPath] = useState([]);
+    const ws = useRef(null);
+    const showLogsRef = useRef(showLogs);
+    const reconnectTimerRef = useRef(null);
+    const shouldReconnectRef = useRef(true);
+    const lastLogRef = useRef({ message: '', timestamp: 0 });
+
+    useEffect(() => {
+        showLogsRef.current = showLogs;
+    }, [showLogs]);
+
+    const appendLog = useCallback((message, { forceOpen = false } = {}) => {
+        const now = Date.now();
+        if (lastLogRef.current.message === message && now - lastLogRef.current.timestamp < 1500) {
+            return;
+        }
+
+        lastLogRef.current = { message, timestamp: now };
+        setLogs((prev) => [...prev, message]);
+
+        if (forceOpen) {
+            setShowLogs(true);
+            setUnreadLogs(0);
+            return;
+        }
+
+        if (!showLogsRef.current) {
+            setUnreadLogs((prev) => prev + 1);
+        }
+    }, []);
+
+    const toggleLogs = useCallback(() => {
+        setShowLogs((prev) => {
+            const next = !prev;
+            if (next) {
+                setUnreadLogs(0);
+            }
+            return next;
+        });
+    }, []);
+
+    const openLogs = useCallback(() => {
+        setShowLogs(true);
+        setUnreadLogs(0);
+    }, []);
+
+    useEffect(() => {
+        shouldReconnectRef.current = true;
+
+        const connectWs = () => {
+            if (!shouldReconnectRef.current) return;
+
+            const socket = new WebSocket(WS_URL);
+            ws.current = socket;
+
+            socket.onopen = () => {
+                appendLog('System connected. Ready.');
+            };
+
+            socket.onmessage = (event) => {
+                const message = event.data;
+                appendLog(message);
+            };
+
+            socket.onclose = () => {
+                if (!shouldReconnectRef.current) return;
+                reconnectTimerRef.current = setTimeout(connectWs, 3000);
+            };
+
+            socket.onerror = (error) => {
+                console.error('WebSocket error:', error);
+            };
+        };
+
+        connectWs();
+        return () => {
+            shouldReconnectRef.current = false;
+
+            if (reconnectTimerRef.current) {
+                clearTimeout(reconnectTimerRef.current);
+                reconnectTimerRef.current = null;
+            }
+
+            if (ws.current && (ws.current.readyState === WebSocket.OPEN || ws.current.readyState === WebSocket.CONNECTING)) {
+                ws.current.close();
+            }
+
+            ws.current = null;
+        };
+    }, [appendLog]);
+
+    const handleProcess = async ({ urls, files, depth }) => {
+        setLoading(true);
+        setLoadingMore(false);
+        setLogs(['Request sent. Waiting for server response...']);
+        setShowLogs(true);
+        setUnreadLogs(0);
+
+        const formData = new FormData();
+        if (urls.length > 0) {
+            formData.append('urls', JSON.stringify(urls));
+        }
+        formData.append('depth', depth);
+        formData.append('node_limit', 700);
+        formData.append('link_limit', 2600);
+
+        if (files.length > 0) {
+            files.forEach((file) => formData.append('files', file));
+        }
+
+        try {
+            const response = await fetch(`${API_BASE}/process`, {
+                method: 'POST',
+                body: formData,
+            });
+            if (!response.ok) {
+                throw new Error('Network response was not ok');
+            }
+
+            const data = await response.json();
+            const normalized = {
+                nodes: data.nodes || [],
+                links: data.links || [],
+                insights: data.insights || {},
+                meta: data.meta || {},
+            };
+
+            setGraphData(normalized);
+            setActiveFilters([]);
+            setSelectedNode(null);
+            setSelectedLink(null);
+            setShortestPath([]);
+            setPathStart('');
+            setPathEnd('');
+        } catch (error) {
+            console.error('Error processing:', error);
+            appendLog(`Error: ${error.message}`, { forceOpen: true });
+            alert('Error processing data. Check logs for details.');
+        } finally {
+            setLoading(false);
+        }
     };
-    reader.readAsText(file);
-  };
 
-  // --- Filtering ---
-  // Identify possible root nodes (URLs and Files)
-  const rootNodes = graphData.nodes.filter(n => n.type === 'web' || n.type === 'file');
+    const handleExport = () => {
+        if (!graphData.nodes.length) return;
 
-  const getFilteredGraph = () => {
-    if (activeFilters.length === 0) return graphData;
+        const sanitizedData = {
+            nodes: graphData.nodes.map((node) => {
+                const cleaned = { ...node };
+                ['index', 'x', 'y', 'z', 'vx', 'vy', 'vz'].forEach((key) => delete cleaned[key]);
+                return cleaned;
+            }),
+            links: graphData.links.map((link) => {
+                const source = getEndpointId(link.source);
+                const target = getEndpointId(link.target);
+                const cleaned = { ...link };
+                delete cleaned.index;
+                return { ...cleaned, source, target };
+            }),
+            insights: graphData.insights || {},
+            meta: graphData.meta || {},
+        };
 
-    const selectedSet = new Set(activeFilters);
+        const jsonString = JSON.stringify(sanitizedData, null, 2);
+        const blob = new Blob([jsonString], { type: 'application/json' });
+        const href = URL.createObjectURL(blob);
+        const downloadLink = document.createElement('a');
+        downloadLink.href = href;
+        downloadLink.download = `graph_network_${new Date().toISOString().slice(0, 10)}.json`;
+        document.body.appendChild(downloadLink);
+        downloadLink.click();
+        document.body.removeChild(downloadLink);
+        URL.revokeObjectURL(href);
+    };
 
-    // 1. Keep selected root nodes
-    const validNodes = new Set(activeFilters);
+    const handleImport = (file) => {
+        const reader = new FileReader();
+        reader.onload = (event) => {
+            try {
+                const data = JSON.parse(event.target.result);
+                if (!data.nodes || !data.links) {
+                    alert('Invalid graph JSON format');
+                    return;
+                }
 
-    // 2. Keep direct neighbors of selected roots
-    // Links might be objects (processed by visualizer) or raw IDs. Handle both.
-    graphData.links.forEach(link => {
-      const sourceId = link.source.id || link.source;
-      const targetId = link.target.id || link.target;
+                setGraphData({
+                    nodes: data.nodes,
+                    links: data.links,
+                    insights: data.insights || {},
+                    meta: data.meta || {},
+                });
+                setActiveFilters([]);
+                setSelectedNode(null);
+                setSelectedLink(null);
+                setShortestPath([]);
+                appendLog(`Loaded graph from ${file.name}`);
+            } catch (error) {
+                console.error(error);
+                alert('Failed to parse JSON');
+            }
+        };
 
-      if (selectedSet.has(sourceId)) {
-        validNodes.add(targetId);
-      } else if (selectedSet.has(targetId)) {
-        validNodes.add(sourceId);
-      }
-    });
+        reader.readAsText(file);
+    };
 
-    // 3. Filter nodes and links
-    const filteredNodes = graphData.nodes.filter(n => validNodes.has(n.id));
-    const filteredLinks = graphData.links.filter(link => {
-      const sourceId = link.source.id || link.source;
-      const targetId = link.target.id || link.target;
-      return validNodes.has(sourceId) && validNodes.has(targetId);
-    });
+    const rootNodes = graphData.nodes.filter((node) => node.type === 'web' || node.type === 'file');
 
-    return { nodes: filteredNodes, links: filteredLinks };
-  };
+    const getFilteredGraph = () => {
+        if (activeFilters.length === 0) return graphData;
 
-  const displayData = getFilteredGraph();
+        const selectedSet = new Set(activeFilters);
+        const validNodes = new Set(activeFilters);
 
-  return (
-    <div className="App">
-      <GraphVisualizer graphData={displayData} />
-      <InputPanel
-        onProcess={handleProcess}
-        loading={loading}
-        onToggleLogs={() => setShowLogs(!showLogs)}
-        onExport={handleExport}
-        onImport={handleImport}
-        rootNodes={rootNodes}
-        selectedFilters={activeFilters}
-        onFilterChange={setActiveFilters}
-      />
-      {showLogs && <LogTerminal logs={logs} onClose={() => setShowLogs(false)} />}
-    </div>
-  );
+        graphData.links.forEach((link) => {
+            const sourceId = getEndpointId(link.source);
+            const targetId = getEndpointId(link.target);
+
+            if (selectedSet.has(sourceId)) {
+                validNodes.add(targetId);
+            } else if (selectedSet.has(targetId)) {
+                validNodes.add(sourceId);
+            }
+        });
+
+        const filteredNodes = graphData.nodes.filter((node) => validNodes.has(node.id));
+        const filteredLinks = graphData.links.filter((link) => {
+            const sourceId = getEndpointId(link.source);
+            const targetId = getEndpointId(link.target);
+            return validNodes.has(sourceId) && validNodes.has(targetId);
+        });
+
+        return {
+            nodes: filteredNodes,
+            links: filteredLinks,
+            insights: graphData.insights || {},
+        };
+    };
+
+    const displayData = getFilteredGraph();
+
+    const entityOptions = useMemo(
+        () =>
+            displayData.nodes
+                .filter((node) => String(node.id).startsWith('entity:'))
+                .map((node) => ({ id: node.id, title: node.title || node.id }))
+                .sort((left, right) => left.title.localeCompare(right.title)),
+        [displayData.nodes]
+    );
+
+    const highlightedLinkKeys = useMemo(() => {
+        if (shortestPath.length < 2) return [];
+
+        const pairSet = new Set();
+        for (let index = 0; index < shortestPath.length - 1; index += 1) {
+            const source = shortestPath[index];
+            const target = shortestPath[index + 1];
+            pairSet.add(`${source}->${target}`);
+            pairSet.add(`${target}->${source}`);
+        }
+
+        return displayData.links
+            .filter((link) => pairSet.has(`${getEndpointId(link.source)}->${getEndpointId(link.target)}`))
+            .map((link) => getLinkKey(link));
+    }, [displayData.links, shortestPath]);
+
+    const shortestPathTitles = useMemo(() => {
+        if (!shortestPath.length) return [];
+        const nodeById = new Map(displayData.nodes.map((node) => [node.id, node]));
+        return shortestPath.map((nodeId) => nodeById.get(nodeId)?.title || nodeId);
+    }, [displayData.nodes, shortestPath]);
+
+    const handleFindPath = () => {
+        const path = findShortestPath(displayData, pathStart, pathEnd);
+        setShortestPath(path);
+    };
+
+    const canLoadMore = Boolean(graphData.meta?.query_id && graphData.meta?.truncated);
+
+    const handleLoadMore = async () => {
+        const meta = graphData.meta || {};
+        if (!meta.query_id || !meta.truncated) return;
+
+        const currentNodeLimit = Number(meta.node_limit || 0);
+        const currentLinkLimit = Number(meta.link_limit || 0);
+        const totalNodes = Number(meta.total_nodes || currentNodeLimit);
+        const totalLinks = Number(meta.total_links || currentLinkLimit);
+        const nextNodeLimit = Math.min(totalNodes, currentNodeLimit + Number(meta.load_more_node_step || 500));
+        const nextLinkLimit = Math.min(totalLinks, currentLinkLimit + Number(meta.load_more_link_step || 2200));
+
+        if (nextNodeLimit <= currentNodeLimit && nextLinkLimit <= currentLinkLimit) {
+            return;
+        }
+
+        setLoadingMore(true);
+        appendLog(`Loading more graph detail (${nextNodeLimit} nodes / ${nextLinkLimit} links target)...`);
+
+        try {
+            const response = await fetch(`${API_BASE}/graph_view`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                    query_id: meta.query_id,
+                    node_limit: nextNodeLimit,
+                    link_limit: nextLinkLimit,
+                }),
+            });
+
+            if (!response.ok) {
+                throw new Error('Failed to load expanded graph.');
+            }
+
+            const data = await response.json();
+            setGraphData({
+                nodes: data.nodes || [],
+                links: data.links || [],
+                insights: data.insights || {},
+                meta: data.meta || {},
+            });
+
+            appendLog(
+                `Expanded graph view: ${data.meta?.visible_nodes || 0}/${data.meta?.total_nodes || 0} nodes, `
+                + `${data.meta?.visible_links || 0}/${data.meta?.total_links || 0} links.`
+            );
+        } catch (error) {
+            console.error(error);
+            appendLog(`Error loading expanded graph: ${error.message}`, { forceOpen: true });
+        } finally {
+            setLoadingMore(false);
+        }
+    };
+
+    const handleResetAll = useCallback(() => {
+        setGraphData({ nodes: [], links: [], insights: {}, meta: {} });
+        setLoading(false);
+        setLoadingMore(false);
+        setActiveFilters([]);
+        setSelectedNode(null);
+        setSelectedLink(null);
+        setPathStart('');
+        setPathEnd('');
+        setShortestPath([]);
+        setLogs([]);
+        setShowLogs(false);
+        setUnreadLogs(0);
+        lastLogRef.current = { message: '', timestamp: 0 };
+        setResetToken((prev) => prev + 1);
+    }, []);
+
+    return (
+        <div className="App">
+            <GraphVisualizer
+                graphData={displayData}
+                onNodeSelect={(node) => {
+                    setSelectedNode(node);
+                    setSelectedLink(null);
+                }}
+                onLinkSelect={(link) => {
+                    setSelectedLink(link);
+                    setSelectedNode(null);
+                }}
+                highlightedNodeIds={shortestPath}
+                highlightedLinkKeys={highlightedLinkKeys}
+            />
+
+            <InputPanel
+                key={`input-panel-${resetToken}`}
+                onProcess={handleProcess}
+                loading={loading}
+                loadingMore={loadingMore}
+                onToggleLogs={toggleLogs}
+                unreadLogs={unreadLogs}
+                onExport={handleExport}
+                onImport={handleImport}
+                onLoadMore={handleLoadMore}
+                onResetAll={handleResetAll}
+                canLoadMore={canLoadMore}
+                graphMeta={graphData.meta}
+                rootNodes={rootNodes}
+                selectedFilters={activeFilters}
+                onFilterChange={setActiveFilters}
+            />
+
+            <InsightsPanel
+                insights={graphData.insights}
+                entityOptions={entityOptions}
+                pathStart={pathStart}
+                pathEnd={pathEnd}
+                onPathStartChange={setPathStart}
+                onPathEndChange={setPathEnd}
+                onFindPath={handleFindPath}
+                shortestPathTitles={shortestPathTitles}
+            />
+
+            <DetailsPanel
+                selectedNode={selectedNode}
+                selectedLink={selectedLink}
+                onClear={() => {
+                    setSelectedNode(null);
+                    setSelectedLink(null);
+                }}
+            />
+
+            {!showLogs && logs.length > 0 && (
+                <button
+                    onClick={openLogs}
+                    style={{
+                        position: 'absolute',
+                        left: '390px',
+                        bottom: '20px',
+                        width: 'auto',
+                        padding: '8px 12px',
+                        fontSize: '0.82rem',
+                        zIndex: 18,
+                        background: 'rgba(15,23,42,0.9)',
+                        border: '1px solid rgba(56,189,248,0.45)',
+                    }}
+                >
+                    Show Logs{unreadLogs > 0 ? ` (${unreadLogs})` : ''}
+                </button>
+            )}
+
+            {showLogs && <LogTerminal logs={logs} onClose={() => setShowLogs(false)} />}
+        </div>
+    );
 }
 
 export default App;

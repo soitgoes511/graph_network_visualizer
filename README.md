@@ -1,57 +1,172 @@
 # Graph Network Visualizer
 
-A single-page data application that visualizes relationships between website links and documents (PDFs, DOCX) as an interactive 3D graph network.
+An interactive graph exploration app that crawls URLs and/or ingests PDF/DOCX files, extracts entities/concepts/relationships with NLP, and visualizes results in a 3D network.
 
-## Features
+## Highlights
 
-- **Recursive URL Scraping**: Crawl a website starting from a URL up to a specified depth.
-- **Document Analysis**: Upload PDF and DOCX files to extract text and links.
-- **Interactive Visualization**: Explore the network using a 3D force-directed graph.
-- **Real-time Logging**: Monitor the scraping and parsing process with live logs.
-- **Containerized**: Fully Dockerized for easy deployment.
+- Recursive web crawling with internal/external link classification.
+- PDF and DOCX parsing with extracted links and text.
+- Rich edge metadata: relation type, weight, confidence, predicate, evidence, source docs.
+- NLP extraction for concepts, normalized entities, sentence co-occurrence, and verb-driven relations.
+- Graph insights: bridge nodes, communities, relation distribution, shortest path between entities.
+- Progressive loading for large graphs: fast high-signal preview first, then `Load More Detail`.
+- Real-time system logs over WebSocket with hide/show controls and unread counters.
+- One-click `New Search (Clear All)` reset without page refresh.
+- Docker and Podman support.
+
+## Recent Improvements
+
+- Added deeper node/edge intelligence and relationship evidence.
+- Added details and insights side panels.
+- Added shortest-path workflow between extracted entities.
+- Improved NLP performance via batched processing.
+- Improved graph-build performance with adaptive analytics:
+  - exact metrics for small graphs,
+  - approximations for medium graphs,
+  - safe fallbacks for very large graphs.
+- Added progressive graph view endpoint (`/graph_view`) with in-memory cache.
+- Fixed duplicate log behavior from overlapping WebSocket reconnect flows.
+- Improved log UX (dock positioning, recoverable hide/unhide).
 
 ## Tech Stack
 
-- **Backend**: Python (FastAPI), BeautifulSoup4, NetworkX, PyPDF, Python-Docx
-- **Frontend**: React (Vite), React Force Graph 3D, Glassmorphism UI
-- **Infrastructure**: Docker, Docker Compose
+- Backend: FastAPI, NetworkX, spaCy, BeautifulSoup4, requests, pypdf, python-docx
+- Frontend: React + Vite, `react-force-graph-3d`
+- Containers: Docker / Podman Compose
 
-## Getting Started
+## Run Locally (Container)
 
 ### Prerequisites
 
-- [Docker](https://www.docker.com/) or [Podman](https://podman.io/)
+- Docker Desktop or Podman
+- Git
 
-### Running the Application
+### Start
 
-1. Clone the repository:
-   ```bash
-   git clone https://github.com/soitgoes511/graph_network_visualizer.git
-   cd graph_network_visualizer
-   ```
+```bash
+git clone https://github.com/soitgoes511/graph_network_visualizer.git
+cd graph_network_visualizer
 
-2. Start the application using Docker Compose:
-   ```bash
-   docker-compose up --build
-   # OR with Podman
-   podman compose up --build
-   ```
+# Docker
+docker-compose up --build
 
-3. Access the application:
-   - Frontend: [http://localhost:5173](http://localhost:5173)
-   - Backend API: [http://localhost:8000](http://localhost:8000)
+# Podman
+podman compose up --build
+```
 
-## Usage
+### Access
 
-1. Open the frontend in your browser.
-2. **Web Crawling**: Enter a URL (e.g., a Wikipedia page) and click `+` to add it. Set the crawl depth (1-3).
-3. **Document Parsing**: Click "Choose Files" to upload PDFs or DOCX files.
-4. Click **VISUALIZE NETWORK** to start processing.
-5. Watch the **LOGS** window for progress updates.
-6. Interact with the 3D graph:
-   - **Left Click**: Open the node's URL.
-   - **Right Click**: Focus on the node.
-   - **Drag/Scroll**: Rotate and zoom the camera.
+- Frontend: `http://localhost:5173`
+- Backend API: `http://localhost:8000`
+
+## Configuration
+
+`docker-compose.yml` sets:
+
+- `VITE_API_URL=http://localhost:8000`
+- `VITE_WS_URL=ws://localhost:8000/ws/logs`
+
+You can override these for remote deployments.
+
+## Application Flow
+
+1. Add one or more URLs and/or upload PDF/DOCX files.
+2. Choose crawl depth (`1` to `4`).
+3. Click `VISUALIZE NETWORK`.
+4. App returns an initial high-interest graph preview quickly.
+5. Use `Load More Detail` to incrementally expand nodes/edges.
+6. Explore:
+   - Left-click node: focus camera, open URL nodes in new tab.
+   - Left-click edge: inspect relationship metadata.
+   - Use Insights panel for bridge nodes, communities, edge-type counts, shortest path.
+7. Click `New Search (Clear All)` to fully reset without refreshing.
+
+## API Summary
+
+### `POST /process`
+
+Form fields:
+
+- `urls` (JSON array string, optional)
+- `files` (multipart files, optional, PDF/DOCX)
+- `depth` (int, default `1`, max `4`)
+- `node_limit` (int, initial preview cap)
+- `link_limit` (int, initial preview cap)
+
+Returns:
+
+- `nodes`
+- `links`
+- `insights`
+- `meta`:
+  - `query_id`
+  - `visible_nodes`, `visible_links`
+  - `total_nodes`, `total_links`
+  - `node_limit`, `link_limit`
+  - `truncated`
+  - `load_more_node_step`, `load_more_link_step`
+
+### `POST /graph_view`
+
+Expands or reshapes the view from cached processed data without re-running scrape/NLP.
+
+JSON body:
+
+- `query_id` (required)
+- `node_limit` (optional)
+- `link_limit` (optional)
+
+Returns same structure as `/process` (`nodes`, `links`, `insights`, `meta`).
+
+### `GET /ws/logs`
+
+WebSocket stream for real-time processing logs.
+
+### `POST /save_graph` and `GET /load_graph`
+
+Save/load graph JSON snapshots.
+
+## Performance Notes
+
+- Initial render now prioritizes high-interest nodes/edges for faster interaction.
+- NLP is batched (`nlp.pipe`) to reduce per-document overhead.
+- Graph analytics are adaptive for scale:
+  - bridge/community/ranking algorithms use smaller-cost paths on larger graphs.
+- `Load More Detail` increases graph scope incrementally, reducing long blocking waits.
+
+## Development
+
+### Backend
+
+```bash
+cd backend
+python -m venv .venv
+.venv\Scripts\activate
+pip install -r requirements.txt
+python -m spacy download en_core_web_sm
+uvicorn main:app --reload
+```
+
+### Frontend
+
+```bash
+cd frontend
+npm install
+npm run dev
+```
+
+### Validation Commands
+
+```bash
+python -m compileall backend
+python backend/test_nlp_simple.py
+cd frontend && npm run lint && npm run build
+```
+
+## Notes and Limits
+
+- Progressive graph cache is in-memory (not persistent) and limited in size by backend constants.
+- Imported JSON graphs can be explored normally, but `Load More Detail` depends on active backend cache from a `/process` run.
 
 ## License
 

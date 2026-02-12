@@ -9,3 +9,5 @@ python-multipart
 websockets
 spacy
 numpy<2.0.0
+openpyxl
+xlrd

@@ -1,11 +1,11 @@
 # Graph Network Visualizer
 
-An interactive graph exploration app that crawls URLs and/or ingests PDF/DOCX files, extracts entities/concepts/relationships with NLP, and visualizes results in a 3D network.
+An interactive graph exploration app that crawls URLs and/or ingests PDF/DOCX/XLSX/XLS/HTML/XML files, extracts entities/concepts/relationships with NLP, and visualizes results in a 3D network.
 
 ## Highlights
 
 - Recursive web crawling with internal/external link classification.
-- PDF and DOCX parsing with extracted links and text.
+- PDF, DOCX, XLSX/XLS, HTML, and XML parsing with extracted links and text.
 - Rich edge metadata: relation type, weight, confidence, predicate, evidence, source docs.
 - NLP extraction for concepts, normalized entities, sentence co-occurrence, and verb-driven relations.
 - Graph insights: bridge nodes, communities, relation distribution, shortest path between entities.
@@ -70,7 +70,7 @@ You can override these for remote deployments.
 
 ## Application Flow
 
-1. Add one or more URLs and/or upload PDF/DOCX files.
+1. Add one or more URLs and/or upload PDF/DOCX/XLSX/XLS/HTML/XML files.
 2. Choose crawl depth (`1` to `4`).
 3. Click `VISUALIZE NETWORK`.
 4. App returns an initial high-interest graph preview quickly.
@@ -88,7 +88,7 @@ You can override these for remote deployments.
 Form fields:
 
 - `urls` (JSON array string, optional)
-- `files` (multipart files, optional, PDF/DOCX)
+- `files` (multipart files, optional, PDF/DOCX/XLSX/XLS/HTML/XML)
 - `depth` (int, default `1`, max `4`)
 - `node_limit` (int, initial preview cap)
 - `link_limit` (int, initial preview cap)

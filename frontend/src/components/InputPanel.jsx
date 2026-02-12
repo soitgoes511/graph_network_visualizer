@@ -123,11 +123,11 @@ const InputPanel = ({
             </div>
 
             <div className="form-group">
-                <label>Documents (PDF, DOCX)</label>
+                <label>Documents (PDF, DOCX, XLSX, XLS, HTML, XML)</label>
                 <input
                     type="file"
                     multiple
-                    accept=".pdf,.docx"
+                    accept=".pdf,.docx,.xlsx,.xls,.html,.htm,.xml"
                     onChange={handleFileChange}
                     ref={fileInputRef}
                     style={{ display: 'block' }}
@@ -285,7 +285,7 @@ const InputPanel = ({
             </div>
 
             <div style={{ marginTop: '20px', fontSize: '0.8rem', color: '#64748b' }}>
-                <p>Supports: Recursive crawling, PDF/DOCX parsing.</p>
+                <p>Supports: Recursive crawling, PDF/DOCX/XLSX/XLS/HTML/XML parsing.</p>
                 <p>Left Click node: Focus + open URL | Left Click edge: Inspect relationship</p>
             </div>
         </div>

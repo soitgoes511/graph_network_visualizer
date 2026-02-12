@@ -9,7 +9,7 @@ from pydantic import BaseModel
 
 from graph_builder import build_graph_from_data
 from nlp_processor import process_text, process_texts
-from parser import parse_docx, parse_pdf
+from parser import parse_docx, parse_excel, parse_html, parse_pdf, parse_xml
 from scraper import scrape_url
 
 SAVE_FILE_PATH = "saved_graph.json"
@@ -458,6 +458,12 @@ async def process_data(
                     parsed_file = await loop.run_in_executor(None, parse_pdf, content, log_callback)
                 elif filename.endswith(".docx"):
                     parsed_file = await loop.run_in_executor(None, parse_docx, content, log_callback)
+                elif filename.endswith(".xlsx") or filename.endswith(".xls"):
+                    parsed_file = await loop.run_in_executor(None, parse_excel, content, upload.filename, log_callback)
+                elif filename.endswith(".html") or filename.endswith(".htm"):
+                    parsed_file = await loop.run_in_executor(None, parse_html, content, log_callback)
+                elif filename.endswith(".xml"):
+                    parsed_file = await loop.run_in_executor(None, parse_xml, content, log_callback)
                 else:
                     log_callback(f"Skipping unsupported file type: {upload.filename}")
                     continue
